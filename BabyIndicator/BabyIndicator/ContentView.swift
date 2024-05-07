@@ -11,8 +11,11 @@ import SwiftUI
 struct ContentView: View {
     @Environment(\.scenePhase) var scenePhase
     
-    @State var timeRemainingValue = 90 // 10800 = 3 hours in seconds
-    @State var maxTimeValue = 90 // 10800 = 3 hours in seconds
+    @State var timeRemainingValue = 10800 // 10800 = 3 hours in seconds
+    @State var maxTimeValue = 10800 // 10800 = 3 hours in seconds
+    
+    @State var timeDelta: TimeInterval?
+    @State var pauseDelta: TimeInterval?
     
     @State var timeRemainingLabel = ""
     
@@ -21,7 +24,6 @@ struct ContentView: View {
     @State var stopButton: StopButton = StopButton()
     
     @State var progressState: ProgressState = ProgressState()
-    
     @State var timerState: TimerState = TimerState()
 
     //    @ObservedObject var stopwatch = Stopwatch()
@@ -56,10 +58,23 @@ struct ContentView: View {
             timeRemainingLabel = composeRemainingLabel(timeInSeconds: progressState.progressValue ?? 0)
             
             if progressState.status == .running {
+                // Calculate time
+                guard let startTime = timerState.startTime else {
+                    return
+                }
+                let nowDate = Date()
+                timeDelta = startTime.distance(to: nowDate)
+                print("timeDelta: \(String(describing: timeDelta))")
+                
+                guard let timeDelta = timeDelta else {
+                    return
+                }
+                let delta = Int(timeDelta)
                 if timeRemainingValue > -maxTimeValue {
-                    timeRemainingValue -= 1
+                    timeRemainingValue = maxTimeValue - delta
                 }
             }
+            // Change progress bar color due to time interval is regular or extra
             if timeRemainingValue > 0 {
                 progressState.setColor(to: .blue)
                 progressState.progressValue = timeRemainingValue
@@ -67,7 +82,6 @@ struct ContentView: View {
                 progressState.setColor(to: .red)
                 progressState.progressValue = maxTimeValue + timeRemainingValue
             }
-            // Calculate time
             
         }.onChange(of: scenePhase) { oldPhase, newPhase in
             if newPhase == .active {
@@ -82,41 +96,41 @@ struct ContentView: View {
             }
         }.onAppear {
             print("====== onAppear ======")
-            // Read state from defaults
-            restoreFromDefaults()
+            setInitialState()
         }
     }
     
     func storeStateToDefaults() {
+        print("Store state to Defaults")
         progressState.saveStateToDefaults()
         timerState.storeToDefaults()
     }
     
     func restoreFromDefaults() {
-        print("RestoreFromDefaults")
+        print("Restore from Defaults")
         progressState.fetchFromDefaults()
         timerState.fetchFromDefaults()
         
-        print("\(String(describing: progressState.progressColor))")
-        print("\(String(describing: progressState.progressValue))")
-        print("\(String(describing: progressState.status))")
-        print("\(String(describing: timerState.startTime))")
+        print("progressColor: \(String(describing: progressState.progressColor))")
+        print("progressValue: \(String(describing: progressState.progressValue))")
+        print("status: \(String(describing: progressState.status))")
+        print("startTime: \(String(describing: timerState.startTime))")
     }
 
     func resetButtonTapped() {
-        print("Reset")
+        print("Reset Button Tapped")
         stopProgress()
-        startProgress()
+        startPauseProgress()
     }
     
     func primaryActionButtonTapped() {
-        print("Primary Action Tapped")
-        startProgress()
+        print("Primary Action Button Tapped")
+        startPauseProgress()
     }
     
     func stopButtonTapped() {
         // STOP
-        print("Stop Tapped")
+        print("Stop Button Tapped")
         stopProgress()
     }
     
@@ -126,36 +140,57 @@ struct ContentView: View {
         setInitialState()
     }
     
-    func startProgress() {
+    func startPauseProgress() {
         if progressState.status == .running {
             // PAUSE
             print("was .running, now .paused")
             progressState.status = .paused
             primaryActionButton.setState(to: .start)
+            timerState.pauseTime = Date()
         } else if progressState.status == .stopped {
             // START
             print("was .stopped, now .running")
             timerState.startTime = Date()
             progressState.status = .running
             primaryActionButton.setState(to: .pause)
+            timerState.pauseTime = nil
         } else {
             // START
             print("was .paused, now .running")
             progressState.status = .running
             primaryActionButton.setState(to: .pause)
+            
+            // Recalculate startTime after pause
+//            guard let startTime = timerState.startTime,
+//                  let pauseTime = timerState.pauseTime else {
+//                return
+//            }
+//          
+//            timerState.startTime = startTime.addingTimeInterval(pauseTime - startTime)
+//            
+//            print("timerState.startTime: \(timerState.startTime)")
+//            timerState.pauseTime = nil
         }
     }
     
     func setInitialState() {
-        primaryActionButton.setState(to: .start)
-        progressState.setColor(to: .blue)
+        print("setInitialState")
         resetTimers()
+        resetUI()
     }
     
     func resetTimers() {
+        print("resetTimers")
         timerState.startTime = nil
-        timeRemainingValue = maxTimeValue
+        progressState.resetState()
         progressState.progressValue = maxTimeValue
+        timeRemainingValue = maxTimeValue
+    }
+    
+    func resetUI() {
+        print("resetUI")
+        primaryActionButton.setState(to: .start)
+        progressState.setColor(to: .blue)
     }
     
     func composeRemainingLabel(timeInSeconds: Int) -> String {
@@ -183,9 +218,11 @@ struct ContentView: View {
 
 class TimerState {
     var startTime: Date?
+    var pauseTime: Date?
     
-    init(startTime: Date? = nil) {
+    init(startTime: Date? = nil, pauseTime: Date? = nil) {
         self.startTime = startTime
+        self.pauseTime = pauseTime
     }
     
     func storeToDefaults() {
@@ -196,10 +233,18 @@ class TimerState {
         } else {
             defaults.removeObject(forKey: "startTime")
         }
+        
+        if let pauseTime = pauseTime {
+            defaults.set(pauseTime, forKey: "pauseTime")
+            defaults.synchronize()
+        } else {
+            defaults.removeObject(forKey: "pauseTime")
+        }
     }
     
     func fetchFromDefaults() {
         startTime = UserDefaults.standard.object(forKey: "startTime") as? Date
+        pauseTime = UserDefaults.standard.object(forKey: "pauseTime") as? Date
     }
 }
 
@@ -263,6 +308,13 @@ class ProgressState: Codable {
                 print("Error decoding progress state: \(error)")
             }
         }
+    }
+    
+    func resetState() {
+        self.status = .stopped
+        self.progressColor = CodableColor(.blue)
+        self.progressValue = 0
+        saveStateToDefaults()
     }
     
     func setColor(to: Color) {
